@@ -20,6 +20,7 @@
 
 
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Numerics;
 using System.Security.Cryptography;
@@ -54,10 +55,13 @@ namespace Eneter.SecureRemotePassword
     public static class SRP
     {
         private static RNGCryptoServiceProvider myRandomGenerator = new RNGCryptoServiceProvider();
-        private static int myPrimeNumberSize = 128;
-        private static BigInteger N = new BigInteger(Convert.FromBase64String("7q8Kua2zjdacM/gK+o/F6GByYYd1/zwLnqIxTJwlZXbWdN90luqB0zg7SBPWksbg4NXY4lC5i+SOSVwdYIna0V3H17RhVNa2zo70rWmxXUmCVZspe88YhcUp9WZmDlfsaO28PAVybMAv1Mv0l26qmv1ROP6DdkNbn8YdL8DrBuM="));
+
+        // The prime number is: 20988936657440586486151264256610222593863921
+        private static BigInteger N = new BigInteger(new byte[] { 241, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 0 });
+        private static int myPrimeNumberSize = N.ToByteArray().Length;
         private static BigInteger g = 2;
         private static BigInteger k = H(N, g);
+
 
         /// <summary>
         /// Allows to setup a different large prime number.
@@ -106,6 +110,11 @@ namespace Eneter.SecureRemotePassword
         public static byte[] v(byte[] xBytes)
         {
             BigInteger x = new BigInteger(xBytes);
+
+            if (x.Sign < 0)
+            {
+                Debugger.Break();
+            }
 
             // v = g^x % N
             BigInteger v = BigInteger.ModPow(g, x, N);
@@ -214,8 +223,18 @@ namespace Eneter.SecureRemotePassword
             BigInteger u = new BigInteger(uBytes);
             BigInteger a = new BigInteger(aBytes);
 
+            // The original formua to calculate the session key for the client is:
             // S = (B − k * (g^x % N))^(a + u * x) % N
-            BigInteger S = BigInteger.ModPow(B - k * BigInteger.ModPow(g, x, N), a + u * x, N);
+            //
+            // However due to the modulo arithmetic when calculating B that is not quite correct.
+            // E.g. B can get smaller then k * (g^x % N) and so
+            // the substraction B - k * (g^x % N) can be less than 0 which
+            // will cause not matching keys between client and service.
+            //
+            // Therefore by applying the modulo arithmetic the improved formula is:
+            // S = (B + k * (g^x % N) * (N - 1)) ^ (a + u * x) % N
+            BigInteger v = BigInteger.ModPow(g, x, N);
+            BigInteger S = BigInteger.ModPow(B + k * v * (N - 1), a + u * x, N);
 
             // K = H(S)
             BigInteger K = H(S);
@@ -296,9 +315,9 @@ namespace Eneter.SecureRemotePassword
             }
 
             // Compute the hash.
-            SHA256 aSha = SHA256.Create();
+            SHA256Managed aSha = new SHA256Managed();
 
-            // Concatenate 0 byte to ensure the generated hash number will be understood as a positive number.
+            // Concatenate 0 to ensure the generated hash number will be understood as a positive number.
             byte[] aHash = aSha.ComputeHash(aBytes).Concat(new byte[] { 0 }).ToArray();
             return aHash;
         }
@@ -313,6 +332,5 @@ namespace Eneter.SecureRemotePassword
 
             return retval;
         }
-
     }
 }
