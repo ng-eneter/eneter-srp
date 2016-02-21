@@ -223,7 +223,7 @@ namespace Eneter.SecureRemotePassword
             BigInteger u = new BigInteger(uBytes);
             BigInteger a = new BigInteger(aBytes);
 
-            // The original formua to calculate the session key for the client is:
+            // The original formula to calculate the session key for the client is:
             // S = (B − k * (g^x % N))^(a + u * x) % N
             //
             // However due to the modulo arithmetic when calculating B that is not quite correct.
