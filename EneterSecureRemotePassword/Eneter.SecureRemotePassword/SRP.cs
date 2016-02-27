@@ -56,8 +56,15 @@ namespace Eneter.SecureRemotePassword
     {
         private static RNGCryptoServiceProvider myRandomGenerator = new RNGCryptoServiceProvider();
 
-        // The prime number is: 20988936657440586486151264256610222593863921
-        private static BigInteger N = new BigInteger(new byte[] { 241, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 240, 0 });
+        // The prime number is:
+        // 17520593701874158028370915808709757311559135004731036178287990173853
+        // 33366544841483884826147664648546626630359228048030338134283071703680
+        // 28802332669752540042735820584582207684890049393260621695533226569112
+        // 16759726125778565962920386496090139562747608067026106900488218998719
+        // 91953917497602225116280480886924497108570268941426816646936938460102
+        // 8647069420217148751652732063899795068604670043
+        private static BigInteger N = new BigInteger(
+            new byte[] { 91, 96, 240, 97, 97, 104, 3, 80, 79, 11, 90, 124, 155, 79, 2, 156, 122, 6, 231, 12, 212, 140, 149, 199, 217, 27, 124, 210, 127, 24, 4, 234, 99, 177, 73, 32, 187, 20, 235, 157, 132, 235, 69, 126, 82, 194, 236, 201, 0, 113, 216, 166, 42, 75, 91, 225, 13, 224, 101, 31, 188, 148, 8, 105, 145, 24, 222, 28, 75, 116, 222, 192, 95, 15, 172, 152, 156, 58, 189, 144, 190, 11, 165, 135, 215, 90, 217, 55, 24, 212, 128, 103, 133, 206, 95, 108, 120, 75, 0, 110, 129, 206, 22, 50, 40, 17, 17, 72, 220, 235, 66, 210, 185, 4, 223, 199, 174, 190, 149, 59, 63, 164, 182, 167, 6, 252, 114, 56, 196, 13, 105, 125, 24, 177, 10, 9, 42, 103, 140, 115, 93, 87, 231, 168, 67, 120, 10, 106, 213, 1, 148, 179, 20, 25, 129, 110, 130, 70, 121, 215, 0 });
         private static int myPrimeNumberSize = N.ToByteArray().Length;
         private static BigInteger g = 2;
         private static BigInteger k = H(N, g);
@@ -80,7 +87,7 @@ namespace Eneter.SecureRemotePassword
         /// <returns>salt 's'</returns>
         public static byte[] s()
         {
-            byte[] aSalt = GetRandomNumber(16);
+            byte[] aSalt = GetPositiveRandomNumber(16);
             return aSalt; 
         }
 
@@ -111,11 +118,6 @@ namespace Eneter.SecureRemotePassword
         {
             BigInteger x = new BigInteger(xBytes);
 
-            if (x.Sign < 0)
-            {
-                Debugger.Break();
-            }
-
             // v = g^x % N
             BigInteger v = BigInteger.ModPow(g, x, N);
             return v.ToByteArray();
@@ -128,7 +130,7 @@ namespace Eneter.SecureRemotePassword
         /// <returns>client secret ephemeral value 'a'</returns>
         public static byte[] a()
         {
-            return GetRandomNumber(myPrimeNumberSize);
+            return GetSecretEphemeralValue();
         }
 
         /// <summary>
@@ -162,7 +164,7 @@ namespace Eneter.SecureRemotePassword
         /// <returns>service secret ephemeral value 'b'</returns>
         public static byte[] b()
         {
-            return GetRandomNumber(myPrimeNumberSize);
+            return GetSecretEphemeralValue();
         }
 
         /// <summary>
@@ -176,7 +178,7 @@ namespace Eneter.SecureRemotePassword
             BigInteger b = new BigInteger(bBytes);
             BigInteger v = new BigInteger(vBytes);
 
-            // B = (kv + (g^b % N)) % N
+            // B = (k * v + (g^b % N)) % N
             BigInteger B = (k * v + BigInteger.ModPow(g, b, N)) % N;
             return B.ToByteArray();
         }
@@ -223,18 +225,17 @@ namespace Eneter.SecureRemotePassword
             BigInteger u = new BigInteger(uBytes);
             BigInteger a = new BigInteger(aBytes);
 
-            // The original formula to calculate the session key for the client is:
             // S = (B − k * (g^x % N))^(a + u * x) % N
-            //
-            // However due to the modulo arithmetic when calculating B that is not quite correct.
-            // E.g. B can get smaller then k * (g^x % N) and so
-            // the substraction B - k * (g^x % N) can be less than 0 which
-            // will cause not matching keys between client and service.
-            //
-            // Therefore by applying the modulo arithmetic the improved formula is:
-            // S = (B + k * (g^x % N) * (N - 1)) ^ (a + u * x) % N
-            BigInteger v = BigInteger.ModPow(g, x, N);
-            BigInteger S = BigInteger.ModPow(B + k * v * (N - 1), a + u * x, N);
+            BigInteger aBase = B - k * BigInteger.ModPow(g, x, N);
+            BigInteger S = BigInteger.ModPow(aBase, a + u * x, N);
+            if (S < 0)
+            {
+                // The problem is that C# incorrectly calculates modulus of negative numbers.
+                // E.g. -2 % 5 = -2 but the correct result is 3.
+                // Because of that the formula: S = [aBase ^ (a + u * x)] % N can give an incorrect result.
+                // Therefore it is needed to recalculate it.
+                S = S + N;
+            }
 
             // K = H(S)
             BigInteger K = H(S);
@@ -322,15 +323,28 @@ namespace Eneter.SecureRemotePassword
             return aHash;
         }
 
-        private static byte[] GetRandomNumber(int length)
+        // Gets random value between 0 and N.
+        private static byte[] GetSecretEphemeralValue()
         {
-            byte[] retval = new byte[length];
-            myRandomGenerator.GetBytes(retval);
+            BigInteger aValue;
+            do
+            {
+                byte[] aValueBytes = GetPositiveRandomNumber(myPrimeNumberSize);
+                aValue = new BigInteger(aValueBytes);
+            } while (aValue >= N);
 
-            // Set last byte to 0 to ensure the generated number is understood as a positive number.
-            retval[retval.Length - 1] = 0;
+            return aValue.ToByteArray();
+        }
 
-            return retval;
+        private static byte[] GetPositiveRandomNumber(int length)
+        {
+            byte[] aValue = new byte[length];
+            myRandomGenerator.GetBytes(aValue);
+
+            // Set sign bit to positive.
+            aValue[aValue.Length - 1] &= 0x7F;
+
+            return aValue;
         }
     }
 }
