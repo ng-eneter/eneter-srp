@@ -26,9 +26,7 @@ namespace Eneter.SecureRemotePassword
     /// <summary>
     /// Data message to send from service to client as a response for the login.
     /// </summary>
-#if !SILVERLIGHT
     [Serializable]
-#endif
     [DataContract]
     public class LoginResponseMessage
     {

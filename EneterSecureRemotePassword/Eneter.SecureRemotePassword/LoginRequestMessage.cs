@@ -29,9 +29,7 @@ namespace Eneter.SecureRemotePassword
     /// <remarks>
     /// Client sends this message to initiate the authentication.
     /// </remarks>
-#if !SILVERLIGHT
     [Serializable]
-#endif
     [DataContract]
     public class LoginRequestMessage
     {
